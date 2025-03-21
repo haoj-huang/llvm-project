@@ -840,6 +840,8 @@ public:
                                                  bool IsNewScope);
   bool TryAnnotateCXXScopeToken(bool EnteringContext = false);
 
+  bool TryConsumeEnumToStrTok();
+
   bool MightBeCXXScopeToken() {
     return Tok.is(tok::identifier) || Tok.is(tok::coloncolon) ||
            (Tok.is(tok::annot_template_id) &&

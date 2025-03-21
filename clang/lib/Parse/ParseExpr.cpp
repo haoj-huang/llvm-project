@@ -1447,10 +1447,21 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::kw_reinterpret_cast:
   case tok::kw_static_cast:
   case tok::kw_addrspace_cast:
+  case tok::kw_str_to_enum:
     if (NotPrimaryExpression)
       *NotPrimaryExpression = true;
     Res = ParseCXXCasts();
     break;
+  case tok::kw_enum_to_str: {
+    if (TryConsumeEnumToStrTok())
+      return ExprError(Diag(Tok, diag::err_expected) << tok::kw_enum_to_str);
+    if (!Tok.is(tok::identifier))
+      return ParseCastExpression(ParseKind, isAddressOfOperand, NotCastExpr,
+                                 isTypeCast, isVectorLiteral,
+                                 NotPrimaryExpression);
+    break;
+  }
+    
   case tok::kw___builtin_bit_cast:
     if (NotPrimaryExpression)
       *NotPrimaryExpression = true;

@@ -2186,6 +2186,15 @@ def err_selected_explicit_constructor : Error<
 def note_explicit_ctor_deduction_guide_here : Note<
   "explicit %select{constructor|deduction guide}0 declared here">;
 
+def err_param_of_enum_to_str : Error<
+  "param of enum_to_str is not an enum">;
+def err_param_of_enum_to_str_type_invisible: Error<
+  "enum type of param of enum_to_str is invisible">;
+def err_param_of_enum_to_str_value_not_in_range : Error<
+  "value not in enum type: %0 range">;
+def err_bad_str_to_enum : Error<
+  "str_to_enum from %0 to %1 is not allowed">;
+
 // C++11 decltype
 def err_decltype_in_declarator : Error<
     "'decltype' cannot be used to name a declaration">;

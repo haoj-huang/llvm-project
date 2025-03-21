@@ -1549,6 +1549,7 @@ ExprResult Parser::ParseCXXCasts() {
   case tok::kw_dynamic_cast:     CastName = "dynamic_cast";     break;
   case tok::kw_reinterpret_cast: CastName = "reinterpret_cast"; break;
   case tok::kw_static_cast:      CastName = "static_cast";      break;
+  case tok::kw_str_to_enum:      CastName = "str_to_enum";      break;
   }
 
   SourceLocation OpLoc = ConsumeToken();

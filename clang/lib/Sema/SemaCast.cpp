@@ -90,6 +90,7 @@ namespace {
     void CheckCStyleCast();
     void CheckBuiltinBitCast();
     void CheckAddrspaceCast();
+    void CheckStrToEnum(Decl *&ECD);
 
     void updatePartOfExplicitCastFlags(CastExpr *CE) {
       // Walk down from the CE to the OrigSrcExpr, and mark all immediate
@@ -256,6 +257,8 @@ static TryCastResult TryReinterpretCast(Sema &Self, ExprResult &SrcExpr,
 static TryCastResult TryAddressSpaceCast(Sema &Self, ExprResult &SrcExpr,
                                          QualType DestType, bool CStyle,
                                          unsigned &msg, CastKind &Kind);
+static TryCastResult TryStrToEnum(Sema &Self, ExprResult &SrcExpr,
+                                  QualType DestType, Decl *&ECD);
 
 /// ActOnCXXNamedCast - Parse
 /// {dynamic,static,reinterpret,const,addrspace}_cast's.
@@ -365,6 +368,21 @@ Sema::BuildCXXNamedCast(SourceLocation OpLoc, tok::TokenKind Kind,
         Context, Op.ResultType, Op.ValueKind, Op.Kind, Op.SrcExpr.get(),
         &Op.BasePath, DestTInfo, CurFPFeatureOverrides(), OpLoc,
         Parens.getEnd(), AngleBrackets));
+  }
+  case tok::kw_str_to_enum: {
+    Decl *D = nullptr;
+    if (!TypeDependent) {
+      Op.CheckStrToEnum(D);
+      if (Op.SrcExpr.isInvalid())
+        return ExprError();
+      DiscardMisalignedMemberAddress(DestType.getTypePtr(), E);
+    }
+
+	EnumConstantDecl *ECD = cast<EnumConstantDecl>(D);
+    return DeclRefExpr::Create(Context, NestedNameSpecifierLoc(),
+                               SourceLocation(), ECD,
+                               /*RefersToEnclosingVariableOrCapture=*/false,
+                               OpLoc, ECD->getType(), ExprValueKind::VK_RValue);
   }
   }
 }
@@ -1077,6 +1095,16 @@ void CastOperation::CheckReinterpretCast() {
   }
 }
 
+void CastOperation::CheckStrToEnum(Decl *&ECD) {
+  unsigned msg = diag::err_bad_str_to_enum;
+  auto TCR = TryStrToEnum(Self, SrcExpr, DestType, ECD);
+  if (TCR != TC_Success && msg != 0) {
+    Self.Diag(OpRange.getBegin(), msg)
+        << SrcExpr.get()->getType() << DestType << OpRange;
+  }
+  if (!isValidCast(TCR))
+    SrcExpr = ExprError();
+}
 
 /// CheckStaticCast - Check that a static_cast\<DestType\>(SrcExpr) is valid.
 /// Refer to C++ 5.2.9 for details. Static casts are mostly used for making
@@ -2464,6 +2492,87 @@ static TryCastResult TryAddressSpaceCast(Sema &Self, ExprResult &SrcExpr,
   }
 }
 
+static TryCastResult TryStrToEnum(Sema &Self, ExprResult &SrcExpr,
+                                  QualType DestType, Decl *&ECD) {
+  auto GetStringFromExpr = [](const DeclRefExpr *DR) -> StringRef {
+    while (true) {
+      if (const VarDecl *V = dyn_cast<VarDecl>(DR->getDecl())) {
+        /// const char Ye[] = "YELLOW";
+        /// const char *RS2 = Ye;
+        /// Color YE2 = str_to_enum<Color>(RS2);
+        const Expr *I = V->getInit();
+        if (const StringLiteral *SL = dyn_cast<StringLiteral>(I))
+          return SL->getString();
+        /// const char *RS1 = "RED";
+        /// Color YE1 = str_to_enum<Color>(RS1);
+        /// const char *RS3 = RS1;
+        /// Color YE3 = str_to_enum<Color>(RS3);
+        /// or more...
+        else if (const ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(I)) {
+          const Expr *SE = ICE->getSubExpr();
+          if (const StringLiteral *SL = dyn_cast<StringLiteral>(SE)) {
+            return SL->getString();
+          } else if (const DeclRefExpr *DRI = dyn_cast<DeclRefExpr>(SE)) {
+            DR = DRI;
+            continue;
+          }
+        }
+      }
+      return StringRef{};
+    }
+  };
+
+  Expr *E = SrcExpr.get();
+  StringRef VS;
+  /// Color YE = str_to_enum<Color>("RED");
+  if (const StringLiteral *SL = dyn_cast<StringLiteral>(E))
+    VS = SL->getString();
+  else if (const ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(E)) {
+    if (const StringLiteral *SL = dyn_cast<StringLiteral>(ICE->getSubExpr()))
+      VS = SL->getString();
+    else if (const DeclRefExpr *DR = dyn_cast<DeclRefExpr>(ICE->getSubExpr()))
+      VS = GetStringFromExpr(DR);
+  }
+  /// Color YE = str_to_enum<Color>(Var);
+  else if (const DeclRefExpr *DR = dyn_cast<DeclRefExpr>(E))
+    VS = GetStringFromExpr(DR);
+
+  if (VS.empty()) {
+	std::string str;
+    Expr::EvalResult ER;
+    ASTContext &Context = Self.getASTContext();
+    if (DeclRefExpr *DR = dyn_cast<DeclRefExpr>(E))
+      if (VarDecl *V = dyn_cast<VarDecl>(DR->getDecl()))
+        E = V->getInit();
+    if (E->EvaluateAsConstantExpr(ER, Context, ConstantExprKind::Normal)) {
+      auto AT = Context.getConstantArrayType(
+          Context.Char16Ty, llvm::APSInt(128), nullptr, ArrayType::Normal, 0);
+      str = ER.Val.getAsString(Context, AT);
+    }
+
+    if (!str.empty()) {
+      VS = StringRef::withNullAsEmpty(str.c_str());
+      auto i = VS.find_first_of('\"');
+      auto j = VS.find_first_of('\"', ++i);
+      VS = VS.slice(i, j);
+    }
+    if (VS.empty())
+      return TC_NotApplicable;
+  }
+
+  if (const EnumType *ET = DestType.getTypePtr()->getAs<EnumType>()) {
+    EnumDecl *ED = ET->getDecl();
+    auto It = std::find_if(ED->enumerator_begin(), ED->enumerator_end(),
+                           [&VS](const auto &i) { return i->getName() == VS; });
+    if (It != ED->enumerator_end()) {
+      ECD = *It;
+      return TC_Success;
+    }
+  }
+
+  return TC_NotApplicable;
+}
+
 void CastOperation::checkAddressSpaceCast(QualType SrcType, QualType DestType) {
   // In OpenCL only conversions between pointers to objects in overlapping
   // addr spaces are allowed. v2.0 s6.5.5 - Generic addr space overlaps
@@ -3073,6 +3182,56 @@ ExprResult Sema::BuildCStyleCastExpr(SourceLocation LPLoc,
       &Op.BasePath, CurFPFeatureOverrides(), CastTypeInfo, LPLoc, RPLoc));
 }
 
+ExprResult Sema::CheckEnumToStrCastExpr(SourceRange R, Expr *CastExpr) {
+  QualType T = CastExpr->getType();
+  const IdentifierInfo *I = T.getBaseTypeIdentifier();
+  const auto *Ty = T.getTypePtr();
+  const EnumType *ET = Ty->getAs<EnumType>();
+  if (!ET) {
+    return ExprError(
+        Diag(CastExpr->getExprLoc(), diag::err_param_of_enum_to_str));
+  }
+
+  EnumConstantDecl *ECD = nullptr;
+  if (const EnumDecl *ED = ET->getDecl()) {
+    if (auto *DR = dyn_cast<DeclRefExpr>(CastExpr))
+      if (auto *V = dyn_cast<VarDecl>(DR->getDecl()))
+        CastExpr = V->getInit();
+    Expr::EvalResult ER;
+    if (CastExpr->EvaluateAsConstantExpr(ER, Context,
+                                         ConstantExprKind::Normal)) {
+      auto It = std::find_if(
+          ED->enumerator_begin(), ED->enumerator_end(),
+          [&ER](auto e) { return ER.Val.getInt() == e->getInitVal(); });
+      if (It == ED->enumerator_end()) {
+        return ExprError(Diag(CastExpr->getExprLoc(),
+                              diag::err_param_of_enum_to_str_value_not_in_range)
+                         << I->getName());
+      }
+      ECD = *It;
+    }
+  }
+
+  if (ECD) {
+    SourceLocation SL = R.getBegin();
+    StringRef Name = ECD->getName();
+
+    QualType StrLitTy =
+        Context.getStringLiteralArrayType(Context.CharTy, Name.size());
+    StringLiteral *StrLit = StringLiteral::Create(
+        Context, Name, StringLiteral::Ascii, false, StrLitTy, SL);
+
+    QualType NewTy =
+        Context.getPointerType(Context.getConstType(Context.CharTy));
+    return ImplicitCastExpr::Create(
+        Context, NewTy, CK_ArrayToPointerDecay, StrLit,
+        /*base paths*/ nullptr, VK_RValue, FPOptionsOverride());
+  } else {
+    return ExprError(
+        Diag(CastExpr->getExprLoc(), diag::err_param_of_enum_to_str));
+  }
+}
+
 ExprResult Sema::BuildCXXFunctionalCastExpr(TypeSourceInfo *CastTypeInfo,
                                             QualType Type,
                                             SourceLocation LPLoc,
@@ -3092,6 +3251,11 @@ ExprResult Sema::BuildCXXFunctionalCastExpr(TypeSourceInfo *CastTypeInfo,
     SubExpr = BindExpr->getSubExpr();
   if (auto *ConstructExpr = dyn_cast<CXXConstructExpr>(SubExpr))
     ConstructExpr->setParenOrBraceRange(SourceRange(LPLoc, RPLoc));
+
+  bool CastToTypeIsEnumToStr =
+      CastTypeInfo->getType().getAsString() == "EnumToStr";
+  if (CastToTypeIsEnumToStr)
+    return CheckEnumToStrCastExpr(Op.OpRange, CastExpr);
 
   return Op.complete(CXXFunctionalCastExpr::Create(
       Context, Op.ResultType, Op.ValueKind, CastTypeInfo, Op.Kind,

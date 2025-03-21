@@ -2057,6 +2057,33 @@ bool Parser::TryAnnotateTypeOrScopeTokenAfterScopeSpec(CXXScopeSpec &SS,
   return false;
 }
 
+bool Parser::TryConsumeEnumToStrTok() { 
+  if (!Tok.is(tok::kw_enum_to_str))
+    return true;
+
+  ASTContext &Context = Actions.getASTContext();
+
+  QualType CT = Context.CharTy;
+  CT.addConst();
+  QualType PT = Context.getPointerType(CT);
+  TypedefDecl *TD = Context.buildImplicitTypedef(PT, "EnumToStr");
+
+  QualType T = Context.getTypeDeclType(TD);
+  Actions.MarkAnyDeclReferenced(TD->getLocation(), TD, /*OdrUse=*/false);
+  ParsedType Ty = ParsedType::make(T);
+
+  SourceLocation BeginLoc = Tok.getLocation();
+
+  Tok.setKind(tok::annot_typename);
+  setTypeAnnotation(Tok, Ty);
+  Tok.setAnnotationEndLoc(Tok.getLocation());
+  Tok.setLocation(BeginLoc);
+
+  PP.AnnotateCachedTokens(Tok);
+
+  return false;
+}
+
 /// TryAnnotateScopeToken - Like TryAnnotateTypeOrScopeToken but only
 /// annotates C++ scope specifiers and template-ids.  This returns
 /// true if there was an error that could not be recovered from.
