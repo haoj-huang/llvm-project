@@ -485,7 +485,8 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S, NestedNameSpecInfo &IdInfo,
                                        NamedDecl *ScopeLookupResult,
                                        bool ErrorRecoveryLookup,
                                        bool *IsCorrectedToColon,
-                                       bool OnlyNamespace) {
+                                       bool OnlyNamespace, 
+                                       bool IsParsingBaseType) {
   if (IdInfo.Identifier->isEditorPlaceholder())
     return true;
   LookupResult Found(*this, IdInfo.Identifier, IdInfo.IdentifierLoc,
@@ -559,8 +560,21 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S, NestedNameSpecInfo &IdInfo,
     LookupName(Found, S);
   }
 
-  if (Found.isAmbiguous())
-    return true;
+  if (Found.isAmbiguous()) {
+    if (IsParsingBaseType) {
+      LookupResult::Filter Filter = Found.makeFilter();
+      while (Filter.hasNext()) {
+        // record type in namespace with same identifier need to be filtered
+        if (isa<TypeDecl>(Filter.next()))
+          Filter.erase();
+      }
+      Filter.done();
+      Found.resolveKindAfterFilter();
+      if (Found.isAmbiguous())
+        return true;
+	} else
+      return true;
+  }
 
   // If we performed lookup into a dependent context and did not find anything,
   // that's fine: just build a dependent nested-name-specifier.
@@ -834,13 +848,15 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S, NestedNameSpecInfo &IdInfo,
                                        bool EnteringContext, CXXScopeSpec &SS,
                                        bool ErrorRecoveryLookup,
                                        bool *IsCorrectedToColon,
-                                       bool OnlyNamespace) {
+                                       bool OnlyNamespace,
+                                       bool IsParsingBaseType) {
   if (SS.isInvalid())
     return true;
 
   return BuildCXXNestedNameSpecifier(S, IdInfo, EnteringContext, SS,
                                      /*ScopeLookupResult=*/nullptr, false,
-                                     IsCorrectedToColon, OnlyNamespace);
+                                     IsCorrectedToColon, OnlyNamespace,
+                                     IsParsingBaseType);
 }
 
 bool Sema::ActOnCXXNestedNameSpecifierDecltype(CXXScopeSpec &SS,

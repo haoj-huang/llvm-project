@@ -6410,7 +6410,8 @@ public:
                                    NamedDecl *ScopeLookupResult,
                                    bool ErrorRecoveryLookup,
                                    bool *IsCorrectedToColon = nullptr,
-                                   bool OnlyNamespace = false);
+                                   bool OnlyNamespace = false,
+                                   bool IsParsingBaseType = false);
 
   /// The parser has parsed a nested-name-specifier 'identifier::'.
   ///
@@ -6443,7 +6444,8 @@ public:
                                    CXXScopeSpec &SS,
                                    bool ErrorRecoveryLookup = false,
                                    bool *IsCorrectedToColon = nullptr,
-                                   bool OnlyNamespace = false);
+                                   bool OnlyNamespace = false,
+                                   bool IsParsingBaseType = false);
 
   ExprResult ActOnDecltypeExpression(Expr *E);
 
@@ -7372,7 +7374,8 @@ public:
                                   bool EnteringContext,
                                   TemplateTy &Template,
                                   bool &MemberOfUnknownSpecialization,
-                                  bool Disambiguation = false);
+                                  bool Disambiguation = false, 
+                                  bool IsParsingBaseType = false);
 
   /// Try to resolve an undeclared template name as a type template.
   ///

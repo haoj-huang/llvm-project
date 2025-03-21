@@ -371,6 +371,18 @@ ParsedType Sema::getTypeName(const IdentifierInfo &II, SourceLocation NameLoc,
     }
   }
 
+  if (isClassName && Result.isAmbiguous()) {
+    LookupResult::Filter Filter = Result.makeFilter();
+    while (Filter.hasNext()) {
+      auto *FD = Filter.next();
+      if (!(isa<TypeDecl>(FD) ||
+            (AllowDeducedTemplate && getAsTypeTemplateDecl(FD))))
+        Filter.erase();
+    }
+    Filter.done();
+    Result.resolveKindAfterFilter();
+  }
+
   NamedDecl *IIDecl = nullptr;
   switch (Result.getResultKind()) {
   case LookupResult::NotFound:

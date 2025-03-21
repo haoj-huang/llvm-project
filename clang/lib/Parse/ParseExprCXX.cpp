@@ -154,7 +154,8 @@ void Parser::CheckForTemplateAndDigraph(Token &Next, ParsedType ObjectType,
 bool Parser::ParseOptionalCXXScopeSpecifier(
     CXXScopeSpec &SS, ParsedType ObjectType, bool ObjectHadErrors,
     bool EnteringContext, bool *MayBePseudoDestructor, bool IsTypename,
-    IdentifierInfo **LastII, bool OnlyNamespace, bool InUsingDeclaration) {
+    IdentifierInfo **LastII, bool OnlyNamespace, bool InUsingDeclaration,
+    bool IsParsingBaseType) {
   assert(getLangOpts().CPlusPlus &&
          "Call sites of this function should be guarded by checking for C++");
 
@@ -454,7 +455,7 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
       bool *CorrectionFlagPtr = ColonIsSacred ? &IsCorrectedToColon : nullptr;
       if (Actions.ActOnCXXNestedNameSpecifier(
               getCurScope(), IdInfo, EnteringContext, SS, false,
-              CorrectionFlagPtr, OnlyNamespace)) {
+              CorrectionFlagPtr, OnlyNamespace, IsParsingBaseType)) {
         // Identifier is not recognized as a nested name, but we can have
         // mistyped '::' instead of ':'.
         if (CorrectionFlagPtr && IsCorrectedToColon) {
@@ -486,7 +487,9 @@ bool Parser::ParseOptionalCXXScopeSpecifier(
                                                         ObjectType,
                                                         EnteringContext,
                                                         Template,
-                                              MemberOfUnknownSpecialization)) {
+                                              MemberOfUnknownSpecialization, 
+                                                        false,
+                                                        IsParsingBaseType)) {
         // If lookup didn't find anything, we treat the name as a template-name
         // anyway. C++20 requires this, and in prior language modes it improves
         // error recovery. But before we commit to this, check that we actually

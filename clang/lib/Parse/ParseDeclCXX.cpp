@@ -1130,7 +1130,13 @@ TypeResult Parser::ParseBaseTypeSpecifier(SourceLocation &BaseLoc,
   CXXScopeSpec SS;
   if (ParseOptionalCXXScopeSpecifier(SS, /*ObjectType=*/nullptr,
                                      /*ObjectHadErrors=*/false,
-                                     /*EnteringContext=*/false))
+                                     /*EnteringContext=*/false,
+                                     /*MayBePseudoDestructor=*/nullptr,
+                                     /*IsTypename=*/false,
+                                     /*LastII=*/nullptr,
+                                     /*OnlyNamespace=*/false,
+                                     /*InUsingDeclaration=*/false,
+                                     /*IsParsingBaseType=*/true))
     return true;
 
   BaseLoc = Tok.getLocation();

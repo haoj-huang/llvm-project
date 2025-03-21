@@ -175,7 +175,8 @@ TemplateNameKind Sema::isTemplateName(Scope *S,
                                       bool EnteringContext,
                                       TemplateTy &TemplateResult,
                                       bool &MemberOfUnknownSpecialization,
-                                      bool Disambiguation) {
+                                      bool Disambiguation,
+                                      bool IsParsingBaseType /* = false*/) {
   assert(getLangOpts().CPlusPlus && "No template names in C!");
 
   DeclarationName TName;
@@ -208,6 +209,17 @@ TemplateNameKind Sema::isTemplateName(Scope *S,
                          &AssumedTemplate,
                          /*AllowTypoCorrection=*/!Disambiguation))
     return TNK_Non_template;
+
+  if (IsParsingBaseType) {
+    LookupResult::Filter Filter = R.makeFilter();
+    while (Filter.hasNext()) {
+      auto *D = Filter.next();
+      if (isa<NamespaceDecl>(D) || isa<NamespaceAliasDecl>(D))
+        Filter.erase();
+    }
+    Filter.done();
+    R.resolveKindAfterFilter();
+  }
 
   if (AssumedTemplate != AssumedTemplateKind::None) {
     TemplateResult = TemplateTy::make(Context.getAssumedTemplateName(TName));
