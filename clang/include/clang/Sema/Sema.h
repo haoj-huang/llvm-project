@@ -2317,7 +2317,8 @@ public:
                          bool IsCtorOrDtorName = false,
                          bool WantNontrivialTypeSourceInfo = false,
                          bool IsClassTemplateDeductionContext = true,
-                         IdentifierInfo **CorrectedII = nullptr);
+                         IdentifierInfo **CorrectedII = nullptr,
+                         bool NeedConversionIdAccessible = false);
   TypeSpecifierType isTagName(IdentifierInfo &II, Scope *S);
   bool isMicrosoftMissingTypename(const CXXScopeSpec *SS, Scope *S);
   void DiagnoseUnknownTypeName(IdentifierInfo *&II,

@@ -2290,8 +2290,10 @@ void Parser::ParseCXXSimpleTypeSpecifier(DeclSpec &DS) {
 ///   type-specifier-seq: [C++ 8.1]
 ///     type-specifier type-specifier-seq[opt]
 ///
-bool Parser::ParseCXXTypeSpecifierSeq(DeclSpec &DS) {
-  ParseSpecifierQualifierList(DS, AS_none, DeclSpecContext::DSC_type_specifier);
+bool Parser::ParseCXXTypeSpecifierSeq(DeclSpec &DS,
+                                      bool IsParsingSingleIdAfterOperator) {
+  ParseSpecifierQualifierList(DS, AS_none, DeclSpecContext::DSC_type_specifier,
+                              IsParsingSingleIdAfterOperator);
   DS.Finish(Actions, Actions.getASTContext().getPrintingPolicy());
   return false;
 }
@@ -2706,7 +2708,8 @@ bool Parser::ParseUnqualifiedIdOperator(CXXScopeSpec &SS, bool EnteringContext,
 
   // Parse the type-specifier-seq.
   DeclSpec DS(AttrFactory);
-  if (ParseCXXTypeSpecifierSeq(DS)) // FIXME: ObjectType?
+  DS.getTypeSpecScope() = SS;
+  if (ParseCXXTypeSpecifierSeq(DS, true)) // FIXME: ObjectType?
     return true;
 
   // Parse the conversion-declarator, which is merely a sequence of

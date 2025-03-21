@@ -2419,11 +2419,13 @@ Decl *Parser::ParseDeclarationAfterDeclaratorAndAttributes(
 /// [GNU]    attributes     specifier-qualifier-list[opt]
 ///
 void Parser::ParseSpecifierQualifierList(DeclSpec &DS, AccessSpecifier AS,
-                                         DeclSpecContext DSC) {
+                                         DeclSpecContext DSC,
+                                         bool IsParsingSingleIdAfterOperator) {
   /// specifier-qualifier-list is a subset of declaration-specifiers.  Just
   /// parse declaration-specifiers and complain about extra stuff.
   /// TODO: diagnose attribute-specifiers and alignment-specifiers.
-  ParseDeclarationSpecifiers(DS, ParsedTemplateInfo(), AS, DSC);
+  ParseDeclarationSpecifiers(DS, ParsedTemplateInfo(), AS, DSC, nullptr,
+                             IsParsingSingleIdAfterOperator);
 
   // Validate declspec for type-name.
   unsigned Specs = DS.getParsedSpecifiers();
@@ -2954,6 +2956,87 @@ static void SetupFixedPointError(const LangOptions &LangOpts,
   isInvalid = true;
 }
 
+bool Parser::TryFindConversionNameInOperatorScopeSpec(
+    bool IsParsingSingleIdAfterOperator,
+    const Token &Tok,
+    const Token &Next,
+    CXXScopeSpec &SS) {
+  if (!SS.isSet() || SS.isInvalid())
+    return false;
+
+  struct SSGuard {
+    bool Result;
+    CXXScopeSpec &CSS;
+    explicit SSGuard(CXXScopeSpec &SS) : Result(false), CSS(SS) {}
+    ~SSGuard() { if (!Result) CSS.clear(); }
+  } SSGuard{SS};
+
+  if (!(Actions.getLangOpts().CPlusPlus &&
+        IsParsingSingleIdAfterOperator &&
+        Tok.isAnyIdentifier() &&
+        Next.isOneOf(tok::semi, tok::comma)))
+    return SSGuard.Result;
+
+  NestedNameSpecifier *NNS = SS.getScopeRep();
+  CXXRecordDecl *CXXRD = nullptr;
+  if (!NNS || !(CXXRD = NNS->getAsRecordDecl()))
+    return SSGuard.Result;
+
+  const IdentifierInfo *I = Tok.getIdentifierInfo();
+  auto ConversionNameSameWithTokID = [&I](NamedDecl *D) -> bool {
+    D = D->getUnderlyingDecl();
+    auto *ConvTemplate = dyn_cast<FunctionTemplateDecl>(D);
+    auto *Conv = ConvTemplate
+                     ? cast<CXXConversionDecl>(ConvTemplate->getTemplatedDecl())
+                     : cast<CXXConversionDecl>(D);
+
+    const IdentifierInfo *II =
+        Conv->getConversionType().getBaseTypeIdentifier();
+    return II->getName() == I->getName();
+  };
+
+  if ([&ConversionNameSameWithTokID](CXXRecordDecl *&D) -> bool {
+        if (auto *M = D->getMemberSpecializationInfo())
+          D = dyn_cast<CXXRecordDecl>(M->getInstantiatedFrom());
+        if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(D))
+          D = CTSD->getSpecializedTemplate()->getTemplatedDecl();
+
+        const auto &Conversions = D->getVisibleConversionFunctions();
+        auto It = std::find_if(Conversions.begin(), Conversions.end(),
+                               ConversionNameSameWithTokID);
+        return It == Conversions.end();
+      }(CXXRD))
+    return SSGuard.Result;
+
+  int offset = -1;
+  SourceRange SR = SS.getRange();
+  DeclContext::lookup_result R = CXXRD->lookup(I);
+  
+  while (R.empty()) {
+    if (!NNS)
+      break;
+
+    if (NamespaceDecl *D = NNS->getAsNamespace())
+      offset -= D->getName().size();
+    else if (NamespaceAliasDecl *D = NNS->getAsNamespaceAlias())
+      offset -= D->getName().size();
+    else if (CXXRecordDecl *D = NNS->getAsRecordDecl())
+      offset -= D->getName().size();
+    else
+      break;
+
+    NNS = NNS->getPrefix();
+    offset -= 2;
+    SR.setEnd(SR.getEnd().getLocWithOffset(offset));
+    SS.MakeTrivial(Actions.getASTContext(), NNS, SR);
+
+    if (DeclContext *DC = Actions.computeDeclContext(SS))
+      R = DC->lookup(I);
+  }
+
+  return (SSGuard.Result = !R.empty());
+}
+
 /// ParseDeclarationSpecifiers
 ///       declaration-specifiers: [C99 6.7]
 ///         storage-class-specifier declaration-specifiers[opt]
@@ -2985,7 +3068,8 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
                                         const ParsedTemplateInfo &TemplateInfo,
                                         AccessSpecifier AS,
                                         DeclSpecContext DSContext,
-                                        LateParsedAttrList *LateAttrs) {
+                                        LateParsedAttrList *LateAttrs,
+                                        bool IsParsingSingleIdAfterOperator) {
   if (DS.getSourceRange().isInvalid()) {
     // Start the range at the current token but make the end of the range
     // invalid.  This will make the entire range invalid unless we successfully
@@ -3197,7 +3281,8 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
                               getCurScope(), &SS, false, false, nullptr,
                               /*IsCtorOrDtorName=*/false,
                               /*WantNontrivialTypeSourceInfo=*/true,
-                              isClassTemplateDeductionContext(DSContext));
+                              isClassTemplateDeductionContext(DSContext),
+                              nullptr, IsParsingSingleIdAfterOperator);
 
       // If the referenced identifier is not a type, then this declspec is
       // erroneous: We already checked about that it has no type specifier, and
@@ -3346,10 +3431,13 @@ void Parser::ParseDeclarationSpecifiers(DeclSpec &DS,
           isConstructorDeclarator(/*Unqualified*/true))
         goto DoneWithDeclSpec;
 
+	  CXXScopeSpec &SS = DS.getTypeSpecScope();
+      bool B = TryFindConversionNameInOperatorScopeSpec(
+          IsParsingSingleIdAfterOperator, Tok, NextToken(), SS);
       ParsedType TypeRep = Actions.getTypeName(
-          *Tok.getIdentifierInfo(), Tok.getLocation(), getCurScope(), nullptr,
+          *Tok.getIdentifierInfo(), Tok.getLocation(), getCurScope(), &SS,
           false, false, nullptr, false, false,
-          isClassTemplateDeductionContext(DSContext));
+          isClassTemplateDeductionContext(DSContext), nullptr, B);
 
       // If this is not a typedef name, don't parse it as part of the declspec,
       // it must be an implicit int or an error.

@@ -1974,7 +1974,8 @@ private:
   /// simple-type-specifier.
   void ParseCXXSimpleTypeSpecifier(DeclSpec &DS);
 
-  bool ParseCXXTypeSpecifierSeq(DeclSpec &DS);
+  bool ParseCXXTypeSpecifierSeq(DeclSpec &DS,
+                                bool IsParsingSingleIdAfterOperator = false);
 
   //===--------------------------------------------------------------------===//
   // C++ 5.3.4 and 5.3.5: C++ new and delete
@@ -2346,19 +2347,26 @@ private:
                         ParsedAttributesWithRange &Attrs);
   DeclSpecContext
   getDeclSpecContextFromDeclaratorContext(DeclaratorContext Context);
+  bool
+  TryFindConversionNameInOperatorScopeSpec(bool IsParsingSingleIdAfterOperator,
+                                           const Token &Tok,
+                                           const Token &Next,
+                                           CXXScopeSpec &SS);
   void ParseDeclarationSpecifiers(
       DeclSpec &DS,
       const ParsedTemplateInfo &TemplateInfo = ParsedTemplateInfo(),
       AccessSpecifier AS = AS_none,
       DeclSpecContext DSC = DeclSpecContext::DSC_normal,
-      LateParsedAttrList *LateAttrs = nullptr);
+      LateParsedAttrList *LateAttrs = nullptr,
+      bool IsParsingSingleIdAfterOperator = false);
   bool DiagnoseMissingSemiAfterTagDefinition(
       DeclSpec &DS, AccessSpecifier AS, DeclSpecContext DSContext,
       LateParsedAttrList *LateAttrs = nullptr);
 
   void ParseSpecifierQualifierList(
       DeclSpec &DS, AccessSpecifier AS = AS_none,
-      DeclSpecContext DSC = DeclSpecContext::DSC_normal);
+      DeclSpecContext DSC = DeclSpecContext::DSC_normal,
+      bool IsParsingSingleIdAfterOperator = false);
 
   void ParseObjCTypeQualifierList(ObjCDeclSpec &DS,
                                   DeclaratorContext Context);

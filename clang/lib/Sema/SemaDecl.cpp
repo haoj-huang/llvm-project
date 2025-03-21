@@ -288,7 +288,8 @@ ParsedType Sema::getTypeName(const IdentifierInfo &II, SourceLocation NameLoc,
                              bool IsCtorOrDtorName,
                              bool WantNontrivialTypeSourceInfo,
                              bool IsClassTemplateDeductionContext,
-                             IdentifierInfo **CorrectedII) {
+                             IdentifierInfo **CorrectedII,
+                             bool NeedConversionIdAccessible) {
   // FIXME: Consider allowing this outside C++1z mode as an extension.
   bool AllowDeducedTemplate = IsClassTemplateDeductionContext &&
                               getLangOpts().CPlusPlus17 && !IsCtorOrDtorName &&
@@ -496,6 +497,11 @@ ParsedType Sema::getTypeName(const IdentifierInfo &II, SourceLocation NameLoc,
     // If it's not plausibly a type, suppress diagnostics.
     Result.suppressDiagnostics();
     return nullptr;
+  }
+
+  if (NeedConversionIdAccessible) {
+    for (auto I = Result.begin(), E = Result.end(); I != E; ++I)
+      I.setAccess(AS_public);
   }
 
   // NOTE: avoid constructing an ElaboratedType(Loc) if this is a
