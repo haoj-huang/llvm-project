@@ -2978,60 +2978,39 @@ bool Parser::TryFindConversionNameInOperatorScopeSpec(
     return SSGuard.Result;
 
   NestedNameSpecifier *NNS = SS.getScopeRep();
-  CXXRecordDecl *CXXRD = nullptr;
-  if (!NNS || !(CXXRD = NNS->getAsRecordDecl()))
+  if (!NNS)
     return SSGuard.Result;
 
-  const IdentifierInfo *I = Tok.getIdentifierInfo();
-  auto ConversionNameSameWithTokID = [&I](NamedDecl *D) -> bool {
-    D = D->getUnderlyingDecl();
-    auto *ConvTemplate = dyn_cast<FunctionTemplateDecl>(D);
-    auto *Conv = ConvTemplate
-                     ? cast<CXXConversionDecl>(ConvTemplate->getTemplatedDecl())
-                     : cast<CXXConversionDecl>(D);
+  CXXRecordDecl *CXXRD = NNS->getAsRecordDecl();
+  if (auto *M = CXXRD->getMemberSpecializationInfo())
+    CXXRD = dyn_cast<CXXRecordDecl>(M->getInstantiatedFrom());
+  else if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(CXXRD))
+    CXXRD = CTSD->getSpecializedTemplate()->getTemplatedDecl();
 
-    const IdentifierInfo *II =
-        Conv->getConversionType().getBaseTypeIdentifier();
-    return II->getName() == I->getName();
-  };
-
-  if ([&ConversionNameSameWithTokID](CXXRecordDecl *&D) -> bool {
-        if (auto *M = D->getMemberSpecializationInfo())
-          D = dyn_cast<CXXRecordDecl>(M->getInstantiatedFrom());
-        if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(D))
-          D = CTSD->getSpecializedTemplate()->getTemplatedDecl();
-
-        const auto &Conversions = D->getVisibleConversionFunctions();
-        auto It = std::find_if(Conversions.begin(), Conversions.end(),
-                               ConversionNameSameWithTokID);
-        return It == Conversions.end();
-      }(CXXRD))
+  if (!CXXRD)
     return SSGuard.Result;
 
   int offset = -1;
   SourceRange SR = SS.getRange();
-  DeclContext::lookup_result R = CXXRD->lookup(I);
-  
+  DeclarationName DN(Tok.getIdentifierInfo());
+  auto R = CXXRD->lookup(DN);
   while (R.empty()) {
     if (!NNS)
       break;
 
-    if (NamespaceDecl *D = NNS->getAsNamespace())
-      offset -= D->getName().size();
-    else if (NamespaceAliasDecl *D = NNS->getAsNamespaceAlias())
-      offset -= D->getName().size();
-    else if (CXXRecordDecl *D = NNS->getAsRecordDecl())
-      offset -= D->getName().size();
-    else
+    NamedDecl *D = nullptr;
+    if (!((D = NNS->getAsNamespace()) ||
+          (D = NNS->getAsNamespaceAlias()) ||
+          (D = NNS->getAsRecordDecl())))
       break;
 
     NNS = NNS->getPrefix();
-    offset -= 2;
+    offset -= (D->getIdentifier()->getLength() + 2);
     SR.setEnd(SR.getEnd().getLocWithOffset(offset));
     SS.MakeTrivial(Actions.getASTContext(), NNS, SR);
 
     if (DeclContext *DC = Actions.computeDeclContext(SS))
-      R = DC->lookup(I);
+      R = DC->lookup(DN);
   }
 
   return (SSGuard.Result = !R.empty());
